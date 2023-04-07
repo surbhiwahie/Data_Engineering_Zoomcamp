@@ -1,4 +1,3 @@
-
 import pandas as pd
 from sqlalchemy import create_engine
 import psycopg2 
@@ -6,65 +5,50 @@ from time import time
 import argparse
 import os
 
-
+def  parquet_to_csv(parquet_file,csv_file):
+    df = pd.read_parquet(parquet_file, engine = "pyarrow")
+    df.to_csv(csv_file, index=False)
+    
+def ingest(csv_file, table_name, engine, chunksize=100000):
+    df_iter = pd.read_csv(csv_file, iterator=True, chunksize=chunksize)
+    run = True
+    while run:
+        try:
+            t_start = time()
+            df = next(df_iter)
+            df['tpep_pickup_datetime'] = pd.to_datetime(df['tpep_pickup_datetime'])
+            df['tpep_dropoff_datetime'] = pd.to_datetime(df['tpep_dropoff_datetime'])
+            df.to_sql(name=table_name, con=engine, if_exists='append')
+            t_end = time()
+            print(f'inserted another chunk, took {t_end-t_start:.3f} seconds')
+        except Exception:
+            run = False
+            
+            
 def main(params):
     user = params.user
     password = params.password
-    host = params.host
-    port = params.port
+    host = params.host 
+    port = params.port 
     db = params.db
     table_name = params.table_name
-    url=params.url
-    csv_name = '/Users/scarstruck/Documents/User_Surbhi/Data/yellow_tripdata_2021-01.csv'
+    url = params.url
+    parquet_file = 'output.parquet'
+    csv_file = 'output.csv'
+    os.system(f'wget {url} -O {parquet_file}')
+    parquet_to_csv(parquet_file, csv_file)
+    engine = create_engine(f'postgresql://{user}:{password}@{host}:{port}/{db}')
+    engine.connect()
+    ingest(csv_file, table_name, engine)
     
-    os.system(f"wget {url} -o {csv_name}")
-    
-    #download the csv 
-    
-    engine = create_engine('postgresql://postgres:postgres@localhost:5431/ny_taxi')
-    
-    
-    ## Now we need to generate the schema:
-    # print(pd.io.sql.get_schema(df, name="yellow_taxi_data"))
-    # print(pd.io.sql.get_schema(df, name='yellow_taxi_data', con=engine)) 
-
-    # We are doing this, because the file size is really big, and reading a file in 
-    # one go will be difficult, so we are doing this in batches. using Iterator =TRUE
-    df_iter = pd.read_csv(csv_name, terator=True, chunksize=100000)
-    df = next(df_iter)
-
-    # converting a couple of columns to datetime cols: 
-    df.tpep_pickup_datetime = pd.to_datetime(df.tpep_pickup_datetime)
-    df.tpep_dropoff_datetime = pd.to_datetime(df.tpep_dropoff_datetime)
-   
-   
-   # we are using iter because, we are putting the data into the table in chunks
-    while True:
-    
-        df = next(df_iter)
-        
-        df.tpep_pickup_datetime = pd.to_datetime(df.tpep_pickup_datetime)
-        df.tpep_dropoff_datetime = pd.to_datetime(df.tpep_dropoff_datetime)
-        df.to_sql(name=table_name, con=engine, if_exists="append")
-        
-        print("data insertion completed.")
-
-
-
-
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Ingest CSV data to Postgres')
-
-    parser.add_argument('user', help='user name for postgres')
-    parser.add_argument('password', help='password for postgres')
-    parser.add_argument('host', help='host for postgres')
-    parser.add_argument('post', help='port for postgres')
-    parser.add_argument('db', help='database name for postgres')
-    parser.add_argument('table-name', help='name of the table where we will write the result to')
-    parser.add_argument('url', help='url of the csv file')
-
-
-    args = parser.parse_args() 
-
+    parser.add_argument('--user', required=True, help='user name for postgres')
+    parser.add_argument('--password', required=True, help='password for postgres')
+    parser.add_argument('--host', required=True, help='host for postgres')
+    parser.add_argument('--port', required=True, help='port for postgres')
+    parser.add_argument('--db', required=True, help='database name for postgres')
+    parser.add_argument('--table_name', required=True, help='name of the table where we will write the results to')
+    parser.add_argument('--url', required=True, help='url of the csv file')
+    args = parser.parse_args()
     main(args)
